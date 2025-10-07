@@ -10,6 +10,7 @@ import Pack.Core
 import Pack.Database
 import Pack.Runner.Database
 import System.Escape
+import System.Info
 
 %default total
 
@@ -94,7 +95,9 @@ appLink exec app withPkgPath cg =
 
       \{interp}$APPLICATION "$@"
       """
-   in write target content >> sys ["chmod", "+x", target]
+   in do
+     write target content
+     if isWindows then pure () else sys ["chmod", "+x", target]
 
 installCmd : (withSrc : Bool) -> CmdArgList
 installCmd True  = ["--install-with-src"]

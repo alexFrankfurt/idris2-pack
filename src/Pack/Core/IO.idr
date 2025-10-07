@@ -10,6 +10,7 @@ import System
 import System.Directory
 import System.File
 import System.File.Meta
+import System.Info
 
 private
 isDirectory : HasIO io => Path Abs -> io Bool
@@ -116,7 +117,15 @@ sysAndLog lvl cmd = do
 
 cmdWithEnv : CmdArgList -> List (String,String) -> String
 cmdWithEnv cmd []  = escapeCmd cmd
-cmdWithEnv cmd env = "\{dispEnv env} \{escapeCmd cmd}"
+cmdWithEnv cmd env =
+  if isWindows then
+    let step : (String, String) -> String -> String
+        step (k,v) acc =
+          let assign = "\{k}=\{v}"
+           in "set \{quote assign} && " ++ acc
+     in foldr step (escapeCmd cmd) env
+  else
+    "\{dispEnv env} \{escapeCmd cmd}"
 
 ||| Tries to run a system command prefixed with the given
 ||| environment variables.
