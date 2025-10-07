@@ -33,6 +33,31 @@ You will be asked about the name of your Chez Scheme executable during
 the installation procedure. If all goes well, make sure to add
 folder `$HOME/.pack/bin` to your `$PATH` variable.
 
+### Reusing an existing Idris2 installation on Windows
+
+Copy idris2.exe to `$PACK_DIR/bin`
+
+If you already have Idris2 installed globally and would like pack to use
+that copy instead of rebuilding from source, mirror the installation into
+pack's managed directory structure. After the first `pack` command has
+run, identify the commit-specific folder under `"$PACK_DIR/install"`
+(for example `d:\Dev\pack-dir-2\install\ab81660dcd63ce8ad9d380f1033993db2684a623\idris2`).
+
+Copy the contents of your global Idris install (both `bin` and
+`lib/idris2-<version>` as well as the `support` directory) into that
+location. A PowerShell snippet looks like this:
+
+```powershell
+$packRoot = 'd:/Dev/pack-dir-2'
+$commit   = 'ab81660dcd63ce8ad9d380f1033993db2684a623'
+$target   = Join-Path $packRoot "install/$commit/idris2"
+Copy-Item 'C:/Idris2/*' $target -Recurse -Force
+```
+
+After the copy completes, `pack build`, `pack repl`, and
+other commands will use the mirrored compiler and core libraries without
+attempting another bootstrap build.
+
 ## Usage
 
 In the following sections, we assume the `$PACK_DIR/bin` folder
