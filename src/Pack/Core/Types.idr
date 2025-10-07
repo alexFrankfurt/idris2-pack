@@ -680,6 +680,12 @@ data PackErr : Type where
   ||| Failed to write to the given file
   WriteFile  : (path : File Abs) -> (err : FileError) -> PackErr
 
+  ||| Failed to remove the given file
+  RemoveFileErr : (path : File Abs) -> (err : FileError) -> PackErr
+
+  ||| Failed to copy a file
+  CopyFileErr : (from : File Abs) -> (to : File Abs) -> (err : FileError) -> PackErr
+
   ||| Failed to read the content of a directory
   DirEntries : (path : Path Abs) -> (err : FileError) -> PackErr
 
@@ -808,6 +814,12 @@ printErr (ReadFile path err) =
 
 printErr (WriteFile path err) =
   "Error when writing to file \{quote path}: \{err}."
+
+printErr (RemoveFileErr path err) =
+  "Error when deleting file \{quote path}: \{err}."
+
+printErr (CopyFileErr from to err) =
+  "Error when copying \{quote from} to \{quote to}: \{err}."
 
 printErr (DirEntries path err) =
   "Error when reading directory \{quote path}: \{err}."

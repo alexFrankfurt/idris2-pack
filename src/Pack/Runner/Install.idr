@@ -226,6 +226,7 @@ maybeGiveNotice : HasIO io => Config => SafeLib -> io ()
 maybeGiveNotice (RL (Git _ _ _ _ _ (Just notice)) _ _ _ _) = warn notice
 maybeGiveNotice _ = pure ()
 
+covering
 installImpl :
      {auto _ : HasIO io}
   -> {auto e : IdrisEnv}
@@ -272,6 +273,7 @@ preInstall rl = withPkgEnv rl.name rl.pkg $ \dir =>
             _        => pure ()
 
 -- Install the given resolved library.
+covering
 installLib :
      {auto _ : HasIO io}
   -> {auto e : IdrisEnv}

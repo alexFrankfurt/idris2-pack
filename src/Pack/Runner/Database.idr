@@ -395,7 +395,7 @@ tmpDelDir b =
    in toMaybe ((".tmp" `isPrefixOf` s) && p /= Types.tmpDir) p
 
 ||| Delete installations from previous package collections.
-export
+export covering
 garbageCollector : HasIO io => Env -> EitherT PackErr io ()
 garbageCollector e = do
   ds <- mapMaybe idrisDelDir <$> entries installDir

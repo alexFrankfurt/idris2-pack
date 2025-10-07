@@ -4,9 +4,23 @@ import public Control.Monad.Either
 import Pack.Config.Types
 import Pack.Core.Logging
 import Pack.Core.Types
+import Control.Monad.Trans
+import Data.FilePath
 import System
 import System.Directory
 import System.File
+import System.File.Meta
+
+private
+isDirectory : HasIO io => Path Abs -> io Bool
+isDirectory path = do
+  mCur <- currentDir
+  case mCur of
+    Nothing => pure False
+    Just curPath => do
+      changed <- changeDir "\{path}"
+      when changed $ ignore $ changeDir curPath
+      pure changed
 
 %default total
 
@@ -166,15 +180,25 @@ sysRunWithEnv cmd env = do
 --         Working with Directories
 --------------------------------------------------------------------------------
 
-||| Checks if a file at the given location exists.
-export %inline
+||| Checks if a file or directory at the given location exists.
+export covering %inline
 exists : HasIO io => (dir : Path Abs) -> io Bool
-exists = exists . interpolate
+exists dir = do
+  let path = interpolate dir
+  filePresent <- System.File.Meta.exists path
+  if filePresent then pure True else do
+    mCur <- currentDir
+    case mCur of
+      Nothing => pure False
+      Just curPath => do
+        changed <- changeDir path
+        when changed $ ignore $ changeDir curPath
+        pure changed
 
 ||| Checks if a file at the given location exists.
 export %inline
 fileExists : HasIO io => (f : File Abs) -> io Bool
-fileExists = exists . interpolate
+fileExists = System.File.Meta.exists . interpolate
 
 ||| Checks if a file at the given location is missing.
 export
@@ -190,17 +214,20 @@ fileMissing = map not . fileExists
 export
 mkDir : HasIO io => (dir : Path Abs) -> EitherT PackErr io ()
 mkDir (PAbs _ [<]) = pure ()
-mkDir d            = sys ["mkdir", "-p", d]
+mkDir dir@(PAbs at (sx :< _)) = do
+  already <- exists dir
+  if already then pure () else do
+    mkDir (PAbs at sx)
+    res <- createDir "\{dir}"
+    case res of
+      Right _         => pure ()
+      Left FileExists => pure ()
+      Left err        => throwE (MkDir dir err)
 
 ||| Creates a parent directory of a (file) path
 export
 mkParentDir : HasIO io => (p : Path Abs) -> EitherT PackErr io ()
 mkParentDir p = whenJust (parentDir p) mkDir
-
-||| Forcefully deletes a directory with all its content
-export
-rmDir : HasIO io => (dir : Path Abs) -> EitherT PackErr io ()
-rmDir dir = when !(exists dir) $ sys ["rm", "-rf", dir]
 
 ||| Returns the current directory's path.
 export
@@ -258,19 +285,70 @@ export
 currentEntries : HasIO io => EitherT PackErr io (List Body)
 currentEntries = curDir >>= entries
 
+private
+removeFileInternal : HasIO io => File Abs -> EitherT PackErr io ()
+removeFileInternal f = do
+  present <- lift $ fileExists f
+  when present $ do
+    res <- System.File.ReadWrite.removeFile "\{f}"
+    case res of
+      Right _  => pure ()
+      Left err => throwE (RemoveFileErr f err)
+
+private
+copyFileInternal : HasIO io => File Abs -> File Abs -> EitherT PackErr io ()
+copyFileInternal from to = do
+  mkDir to.parent
+  case !(lift $ System.File.copyFile "\{from}" "\{to}") of
+    Right _            => pure ()
+    Left (fileErr, _)  => throwE (CopyFileErr from to fileErr)
+
+private covering
+removeDirRec : HasIO io => Path Abs -> EitherT PackErr io ()
+removeDirRec current = do
+  names <- entries current
+  traverse_ (\name => do
+    let subPath := current //> name
+    isDir <- lift $ isDirectory subPath
+    if isDir then removeDirRec subPath
+             else removeFileInternal (MkF current name)
+    ) names
+  lift $ removeDir "\{current}"
+
+private covering
+copyDirRec : HasIO io => Path Abs -> Path Abs -> EitherT PackErr io ()
+copyDirRec src dst = do
+  mkDir dst
+  names <- entries src
+  traverse_ (\name => do
+    let srcPath := src //> name
+    let dstPath := dst //> name
+    isDir <- lift $ isDirectory srcPath
+    if isDir then copyDirRec srcPath dstPath
+             else copyFileInternal (MkF src name) (MkF dst name)
+    ) names
+
+||| Forcefully deletes a directory with all its content
+export covering
+rmDir : HasIO io => (dir : Path Abs) -> EitherT PackErr io ()
+rmDir dir = do
+  present <- lift $ exists dir
+  when present $ removeDirRec dir
+
 ||| Copy a directory.
-export
+export covering
 copyDir : HasIO io => (from,to : Path Abs) -> EitherT PackErr io ()
 copyDir from to = do
   mkParentDir to
-  sys ["cp", "-r", from, to]
+  copyDirRec from to
 
 ||| Copy a whole directory into the given parent directory.
-export
+export covering
 copyDirInto : HasIO io => (from,parent : Path Abs) -> EitherT PackErr io ()
 copyDirInto from parent = do
   mkDir parent
-  sys ["cp", "-r", from, "\{parent}/"]
+  Just name <- pure (basename from) | Nothing => throwE (InvalidBody ("\{from}"))
+  copyDir from (parent //> name)
 
 ||| Tries to find the first file, the body of which returns `True` for
 ||| the given predicate.
@@ -305,6 +383,8 @@ findInAllParentDirs p = go [] where
       Just parentD => go nextRes $ assert_smaller currD parentD
       Nothing      => pure nextRes
 
+
+export
 mkTmpDir : HasIO io => PackDir => EitherT PackErr io TmpDir
 mkTmpDir = go 100 0
 
@@ -315,18 +395,47 @@ mkTmpDir = go 100 0
       let Just body := Body.parse ".tmp\{show n}" | Nothing => go k (S n)
           dir       := packDir /> body
        in do
-         False <- exists dir | True => go k (S n)
-         when (n > 50) $
-           warn {ref = MkLogRef Info}
-             """
-             Too many temporary directories. Please remove all `.tmpXY`
-             directories in `PACK_DIR` or run `pack gc` to let pack
-             clean them up.
-             """
-         mkDir dir
-         pure (TD dir)
+         let pathStr = interpolate dir
+         lift $ putStrLn (" mkTmpDir probing " ++ pathStr)
+         metaPresent <- lift $ System.File.Meta.exists pathStr
+         lift $ putStrLn ("  System.File.Meta.exists => " ++ show metaPresent)
+         changePresent <- lift $ do
+           mCur <- currentDir
+           case mCur of
+             Nothing => do
+               putStrLn "  currentDir unavailable; skipping changeDir probe"
+               pure False
+             Just curPath => do
+               changed <- changeDir pathStr
+               case changed of
+                 True => do
+                   putStrLn ("  changeDir succeeded; reverting to " ++ curPath)
+                   reverted <- changeDir curPath
+                   when (not reverted) $ putStrLn ("  changeDir revert to " ++ curPath ++ " FAILED")
+                   pure True
+                 False => do
+                   putStrLn "  changeDir failed"
+                   pure False
+         let present = metaPresent || changePresent
+         case present of
+           True => do
+             lift $ putStrLn ("mkTmpDir skipping existing: " ++ show dir ++ " (n = " ++ show n ++ ")")
+             go k (S n)
+           False => do
+             when (n > 50) $ do
+               lift $ putStrLn ("  mkTmpDir high index threshold hit (n = " ++ show n ++ "); emitting warning")
+               warn {ref = MkLogRef Info}
+                 """
+                 Too many temporary directories. Please remove all `.tmpXY`
+                 directories in `PACK_DIR` or run `pack gc` to let pack
+                 clean them up.
+                 """
+             lift $ putStrLn ("  mkTmpDir creating new directory: " ++ show dir)
+             mkDir dir
+             lift $ putStrLn ("  mkTmpDir created directory successfully: " ++ show dir)
+             pure (TD dir)
 
-export
+export covering
 withTmpDir :
      {auto _ : HasIO io}
   -> {auto _ : PackDir}
@@ -343,7 +452,7 @@ withTmpDir f = do
 ||| Delete a file.
 export
 rmFile : HasIO io => (f : File Abs) -> EitherT PackErr io ()
-rmFile f = when !(fileExists f) $ sys ["rm", f]
+rmFile = removeFileInternal
 
 ||| Tries to read the content of a file
 export covering
@@ -382,9 +491,7 @@ link from to = do
 ||| Copy a file.
 export
 copyFile : HasIO io => (from,to : File Abs) -> EitherT PackErr io ()
-copyFile from to = do
-  mkDir to.parent
-  sys ["cp", from, to]
+copyFile = copyFileInternal
 
 ||| Patch a file
 export

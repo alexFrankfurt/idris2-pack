@@ -402,7 +402,7 @@ getPackDir = do
   throwE NoPackDir
 
 ||| Update the package database.
-export
+export partial
 updateDB : HasIO io => TmpDir => PackDir => EitherT PackErr io ()
 updateDB = do
   rmDir dbDir
@@ -434,7 +434,7 @@ copyLatest = do
 
 ||| Loads the name of the default collection (currently the latest
 ||| nightly)
-export
+export partial
 defaultColl : HasIO io => TmpDir => PackDir => EitherT PackErr io DBName
 defaultColl = do
   when !(missing dbDir) updateDB

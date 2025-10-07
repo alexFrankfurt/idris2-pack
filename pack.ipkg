@@ -9,9 +9,9 @@ brief   = "A package manager for Idris2 with curated package collections"
 langversion >= 0.6.0
 
 -- script to run before building
-prebuild = "bash version.sh"
+prebuild = "pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File version.ps1 || bash version.sh"
 
-postbuild = "bash restore.sh"
+postbuild = "pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File restore.ps1 || bash restore.sh"
 
 depends = base >= 0.6.0
         , elab-util

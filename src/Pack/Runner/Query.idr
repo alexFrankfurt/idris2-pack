@@ -315,6 +315,7 @@ fuzzyTrim =
   . filter (pre /=)
   . lines
 
+covering
 fuzzyPkg :
      {auto _ : HasIO io}
   -> {auto _ : IdrisEnv}
